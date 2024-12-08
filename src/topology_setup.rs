@@ -1,4 +1,4 @@
-﻿use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::collections::HashMap;
 use std::thread::JoinHandle;
 use std::{fs, thread};
@@ -97,7 +97,10 @@ pub fn create_intermediate_topology(
         );
     }
 
-    fn insert_all_packet_send(connected_drone_ids: &[NodeId], packet_senders: &HashMap<NodeId, Sender<Packet>>) -> HashMap<NodeId, Sender<Packet>> {
+    fn insert_all_packet_send(
+        connected_drone_ids: &[NodeId],
+        packet_senders: &HashMap<NodeId, Sender<Packet>>,
+    ) -> HashMap<NodeId, Sender<Packet>> {
         let mut packet_send = HashMap::new();
         for neighbor_id in connected_drone_ids.iter() {
             if let Some(snd) = packet_senders.get(neighbor_id) {
@@ -137,7 +140,24 @@ pub fn create_intermediate_topology(
 
 pub fn create_nodes(
     intermediate_nodes: HashMap<NodeId, IntermediateNode>,
-    mut drone_creator: impl FnMut(NodeId, Sender<DroneEvent>, Receiver<DroneCommand>, Receiver<Packet>, HashMap<NodeId, Sender<Packet>>, f32) -> Box<dyn Node>,
+    mut drone_creator: impl FnMut(
+        NodeId,
+        Sender<DroneEvent>,
+        Receiver<DroneCommand>,
+        Receiver<Packet>,
+        HashMap<NodeId, Sender<Packet>>,
+        f32,
+    ) -> Box<dyn Node>,
+    mut client_creator: impl FnMut(
+        NodeId,
+        Receiver<Packet>,
+        HashMap<NodeId, Sender<Packet>>,
+    ) -> Option<Box<dyn Node>>,
+    mut server_creator: impl FnMut(
+        NodeId,
+        Receiver<Packet>,
+        HashMap<NodeId, Sender<Packet>>,
+    ) -> Option<Box<dyn Node>>,
 ) -> HashMap<NodeId, Box<dyn Node>> {
     let mut nodes: HashMap<NodeId, Box<dyn Node>> = HashMap::new();
     for node in intermediate_nodes.into_values() {
@@ -150,14 +170,35 @@ pub fn create_nodes(
                 packet_recv,
                 packet_send,
             } => {
-                let boxed_drone = drone_creator(id, controller_send, controller_recv, packet_recv, packet_send, pdr);
+                let boxed_drone = drone_creator(
+                    id,
+                    controller_send,
+                    controller_recv,
+                    packet_recv,
+                    packet_send,
+                    pdr,
+                );
                 nodes.insert(id, boxed_drone);
             }
-            IntermediateNode::Client { .. } => {
-                // todo!("Create client")
+            IntermediateNode::Client {
+                id,
+                packet_recv,
+                packet_send,
+            } => {
+                let boxed_client = client_creator(id, packet_recv, packet_send);
+                if let Some(boxed_client) = boxed_client {
+                    nodes.insert(id, boxed_client);
+                }
             }
-            IntermediateNode::Server { .. } => {
-                // todo!("Create server")
+            IntermediateNode::Server {
+                id,
+                packet_recv,
+                packet_send,
+            } => {
+                let boxed_server = server_creator(id, packet_recv, packet_send);
+                if let Some(boxed_server) = boxed_server {
+                    nodes.insert(id, boxed_server);
+                }
             }
         }
     }
@@ -170,10 +211,4 @@ pub fn spawn_threads(nodes: HashMap<NodeId, Box<dyn Node>>) -> HashMap<NodeId, J
         handles.insert(id, thread::spawn(move || node.run()));
     }
     handles
-}
-
-pub fn create_topology_from_str(path: &str, drone_creator: impl FnMut(NodeId, Sender<DroneEvent>, Receiver<DroneCommand>, Receiver<Packet>, HashMap<NodeId, Sender<Packet>>, f32) -> Box<dyn Node>) -> HashMap<NodeId, Box<dyn Node>> {
-    let config = read_config_file(path);
-    let (intermediate_nodes, _) = create_intermediate_topology(config);
-    create_nodes(intermediate_nodes, drone_creator)
 }

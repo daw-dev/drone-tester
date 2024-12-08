@@ -1,8 +1,11 @@
-﻿use crate::topology_setup::{create_intermediate_topology, create_nodes, read_config_file, spawn_threads, IntermediateNode, Node};
+use crate::topology_setup::{
+    create_intermediate_topology, create_nodes, read_config_file, spawn_threads, IntermediateNode,
+    Node,
+};
 use crossbeam_channel::{Receiver, Sender};
+use rand::{thread_rng, Rng};
 use std::collections::HashMap;
 use std::thread;
-use rand::{thread_rng, Rng};
 use wg_2024::config::Drone;
 use wg_2024::controller::{DroneCommand, DroneEvent};
 use wg_2024::network::NodeId;
@@ -79,7 +82,24 @@ pub fn create_test_environment(
     topology_file_path: &str,
     mut test_nodes: Vec<TestNode>,
     pdr_policy: PDRPolicy,
-    drone_creator: impl FnMut(NodeId, Sender<DroneEvent>, Receiver<DroneCommand>, Receiver<Packet>, HashMap<NodeId, Sender<Packet>>, f32) -> Box<dyn Node>,
+    drone_creator: impl FnMut(
+        NodeId,
+        Sender<DroneEvent>,
+        Receiver<DroneCommand>,
+        Receiver<Packet>,
+        HashMap<NodeId, Sender<Packet>>,
+        f32,
+    ) -> Box<dyn Node>,
+    client_creator: impl FnMut(
+        NodeId,
+        Receiver<Packet>,
+        HashMap<NodeId, Sender<Packet>>,
+    ) -> Option<Box<dyn Node>>,
+    server_creator: impl FnMut(
+        NodeId,
+        Receiver<Packet>,
+        HashMap<NodeId, Sender<Packet>>,
+    ) -> Option<Box<dyn Node>>,
 ) {
     let mut config = read_config_file(topology_file_path);
 
@@ -125,7 +145,7 @@ pub fn create_test_environment(
             non_test_intermediate_nodes.insert(id, node);
         }
     }
-    let nodes = create_nodes(non_test_intermediate_nodes, drone_creator);
+    let nodes = create_nodes(non_test_intermediate_nodes, drone_creator, client_creator, server_creator);
     let join_handles = spawn_threads(nodes);
 
     let end_simulation = move || {
@@ -160,5 +180,6 @@ pub fn create_test_environment(
     for handle in join_handles.into_values() {
         handle.join().ok();
     }
+
     println!("Test ended");
 }

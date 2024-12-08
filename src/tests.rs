@@ -1,18 +1,40 @@
-﻿use std::collections::HashMap;
 use crate::testing_initializer::{create_test_environment, PDRPolicy, TestNode};
+use crate::topology_setup::Node;
+use bagel_bomber::BagelBomber;
+use crossbeam_channel::{Receiver, Sender};
+use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
-use crossbeam_channel::{Receiver, Sender};
 use wg_2024::controller::{DroneCommand, DroneEvent};
 use wg_2024::drone::Drone;
 use wg_2024::network::{NodeId, SourceRoutingHeader};
 use wg_2024::packet::NodeType::Client;
 use wg_2024::packet::{FloodRequest, Fragment, Packet, PacketType, FRAGMENT_DSIZE};
-use bagel_bomber::BagelBomber;
-use crate::topology_setup::Node;
 
-pub fn create_bagel_bomber(id: NodeId, controller_send: Sender<DroneEvent>, controller_recv: Receiver<DroneCommand>, packet_recv: Receiver<Packet>, packet_send: HashMap<NodeId, Sender<Packet>>, pdr: f32) -> Box<dyn Node> {
-    Box::new(BagelBomber::new(id, controller_send, controller_recv, packet_recv, packet_send, pdr))
+pub fn create_bagel_bomber(
+    id: NodeId,
+    controller_send: Sender<DroneEvent>,
+    controller_recv: Receiver<DroneCommand>,
+    packet_recv: Receiver<Packet>,
+    packet_send: HashMap<NodeId, Sender<Packet>>,
+    pdr: f32,
+) -> Box<dyn Node> {
+    Box::new(BagelBomber::new(
+        id,
+        controller_send,
+        controller_recv,
+        packet_recv,
+        packet_send,
+        pdr,
+    ))
+}
+
+pub fn create_none_client_server(
+    _id: NodeId,
+    _packet_recv: Receiver<Packet>,
+    _packet_send: HashMap<NodeId, Sender<Packet>>,
+) -> Option<Box<dyn Node>> {
+    None
 }
 
 #[test]
@@ -58,6 +80,8 @@ fn flooding() {
         vec![client],
         PDRPolicy::Zero,
         create_bagel_bomber,
+        create_none_client_server,
+        create_none_client_server,
     )
 }
 
@@ -153,6 +177,8 @@ fn client_server_ping() {
         vec![client, server],
         PDRPolicy::Zero,
         create_bagel_bomber,
+        create_none_client_server,
+        create_none_client_server,
     )
 }
 
@@ -225,5 +251,7 @@ fn continuous_ping() {
         vec![client, server],
         PDRPolicy::Zero,
         create_bagel_bomber,
+        create_none_client_server,
+        create_none_client_server,
     )
 }
