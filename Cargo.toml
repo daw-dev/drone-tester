@@ -8,3 +8,6 @@ wg_2024 = { git = "https://github.com/WGL-2024/WGL_repo_2024.git", features = ["
 crossbeam-channel = "0.5.13"
 rand = "0.8.5"
 toml = "0.8.19"
+
+[dev-dependencies]
+bagel_bomber = { git = "https://github.com/daw-dev/bagel-bomber.git" }

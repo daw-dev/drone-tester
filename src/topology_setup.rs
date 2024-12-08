@@ -97,7 +97,7 @@ pub fn create_intermediate_topology(
         );
     }
 
-    fn insert_all_packet_send(connected_drone_ids: &Vec<NodeId>, packet_senders: &HashMap<NodeId, Sender<Packet>>) -> HashMap<NodeId, Sender<Packet>> {
+    fn insert_all_packet_send(connected_drone_ids: &[NodeId], packet_senders: &HashMap<NodeId, Sender<Packet>>) -> HashMap<NodeId, Sender<Packet>> {
         let mut packet_send = HashMap::new();
         for neighbor_id in connected_drone_ids.iter() {
             if let Some(snd) = packet_senders.get(neighbor_id) {
@@ -151,7 +151,7 @@ pub fn create_nodes(
                 packet_send,
             } => {
                 let boxed_drone = drone_creator(id, controller_send, controller_recv, packet_recv, packet_send, pdr);
-                nodes.insert(id, boxed_drone.into());
+                nodes.insert(id, boxed_drone);
             }
             IntermediateNode::Client { .. } => {
                 // todo!("Create client")
