@@ -8,7 +8,7 @@ use wg_2024::drone::Drone;
 use wg_2024::network::{NodeId, SourceRoutingHeader};
 use wg_2024::packet::NodeType::Client;
 use wg_2024::packet::{FloodRequest, Fragment, Packet, PacketType, FRAGMENT_DSIZE};
-use bagel_bomber::bagel_bomber::BagelBomber;
+use bagel_bomber::BagelBomber;
 use crate::topology_setup::Node;
 
 pub fn create_bagel_bomber(id: NodeId, controller_send: Sender<DroneEvent>, controller_recv: Receiver<DroneCommand>, packet_recv: Receiver<Packet>, packet_send: HashMap<NodeId, Sender<Packet>>, pdr: f32) -> Box<dyn Node> {
