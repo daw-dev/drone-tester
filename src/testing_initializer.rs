@@ -145,7 +145,12 @@ pub fn create_test_environment(
             non_test_intermediate_nodes.insert(id, node);
         }
     }
-    let nodes = create_nodes(non_test_intermediate_nodes, drone_creator, client_creator, server_creator);
+    let nodes = create_nodes(
+        non_test_intermediate_nodes,
+        drone_creator,
+        client_creator,
+        server_creator,
+    );
     let join_handles = spawn_threads(nodes);
 
     let end_simulation = move || {
