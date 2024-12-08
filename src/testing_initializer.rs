@@ -65,7 +65,7 @@ pub enum PDRPolicy {
 }
 
 impl PDRPolicy {
-    fn get_prd(&self) -> f32 {
+    fn get_pdr(&self) -> f32 {
         match self {
             PDRPolicy::Zero => 0.0,
             PDRPolicy::Gentle => thread_rng().gen_range(0.0..0.1),
@@ -93,12 +93,12 @@ pub fn create_test_environment(
         }
         config.drone.push(Drone {
             id: test_node.id,
-            pdr: pdr_policy.get_prd(),
+            pdr: pdr_policy.get_pdr(),
             connected_node_ids: test_node.connected_drone_ids.clone(),
         });
         let connected_ids = test_node.connected_drone_ids.clone();
         for drone in config.drone.iter_mut() {
-            drone.pdr = pdr_policy.get_prd();
+            drone.pdr = pdr_policy.get_pdr();
             if connected_ids.contains(&drone.id) {
                 drone.connected_node_ids.push(test_node.id);
             }
