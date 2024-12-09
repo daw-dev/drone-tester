@@ -247,7 +247,7 @@ fn continuous_ping() {
     create_test_environment(
         "topologies/examples/double-chain/topology.toml",
         vec![client, server],
-        PDRPolicy::Zero,
+        PDRPolicy::Severe,
         create_bagel_bomber,
         create_none_client_server,
         create_none_client_server,
