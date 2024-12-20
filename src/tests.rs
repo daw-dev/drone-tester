@@ -80,8 +80,8 @@ fn flooding() {
         vec![client],
         PDRPolicy::Zero,
         create_bagel_bomber,
-        create_none_client_server,
-        create_none_client_server,
+        None::<fn(_,_,_)->_>,
+        None::<fn(_,_,_)->_>,
     )
 }
 
@@ -176,8 +176,8 @@ fn client_server_ping() {
         vec![client, server],
         PDRPolicy::Zero,
         create_bagel_bomber,
-        create_none_client_server,
-        create_none_client_server,
+        None::<fn(_,_,_)->_>,
+        None::<fn(_,_,_)->_>,
     )
 }
 
@@ -249,7 +249,7 @@ fn continuous_ping() {
         vec![client, server],
         PDRPolicy::Severe,
         create_bagel_bomber,
-        create_none_client_server,
-        create_none_client_server,
+        None::<fn(_,_,_)->_>,
+        None::<fn(_,_,_)->_>,
     )
 }

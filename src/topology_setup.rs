@@ -5,8 +5,8 @@ use std::{fs, thread};
 use wg_2024::config::Config;
 use wg_2024::controller::{DroneCommand, DroneEvent};
 use wg_2024::drone::Drone;
-use wg_2024::network::NodeId;
-use wg_2024::packet::Packet;
+use wg_2024::network::{NodeId, SourceRoutingHeader};
+use wg_2024::packet::{Fragment, Packet};
 
 pub trait Node: Send {
     fn run(&mut self);
@@ -17,6 +17,8 @@ impl<T: Drone + Send> Node for T {
         self.run();
     }
 }
+
+#[derive(Debug)]
 pub enum IntermediateNode {
     Drone {
         id: NodeId,
@@ -44,6 +46,19 @@ pub fn read_config_file(path: &str) -> Config {
     config
 }
 
+fn insert_all_packet_send(
+    connected_drone_ids: &[NodeId],
+    packet_senders: &HashMap<NodeId, Sender<Packet>>,
+) -> HashMap<NodeId, Sender<Packet>> {
+    let mut packet_send = HashMap::with_capacity(connected_drone_ids.len());
+    for neighbor_id in connected_drone_ids.iter() {
+        if let Some(snd) = packet_senders.get(neighbor_id) {
+            packet_send.insert(*neighbor_id, snd.clone());
+        }
+    }
+    packet_send
+}
+
 pub fn create_intermediate_topology(
     config: Config,
 ) -> (
@@ -56,34 +71,30 @@ pub fn create_intermediate_topology(
     let mut command_senders: HashMap<NodeId, Sender<DroneCommand>> = HashMap::new();
     let mut command_receivers: HashMap<NodeId, Receiver<DroneCommand>> = HashMap::new();
 
-    for el in config.drone.iter() {
+    for drone in config.drone.iter() {
         let (snd, rcv) = unbounded();
-        packet_receivers.insert(el.id, rcv);
-        packet_senders.insert(el.id, snd);
+        packet_receivers.insert(drone.id, rcv);
+        packet_senders.insert(drone.id, snd);
         let (snd, rcv) = unbounded();
-        command_receivers.insert(el.id, rcv);
-        command_senders.insert(el.id, snd);
+        command_receivers.insert(drone.id, rcv);
+        command_senders.insert(drone.id, snd);
     }
-    for el in config.client.iter() {
+    for client in config.client.iter() {
         let (snd, rcv) = unbounded();
-        packet_receivers.insert(el.id, rcv);
-        packet_senders.insert(el.id, snd);
+        packet_receivers.insert(client.id, rcv);
+        packet_senders.insert(client.id, snd);
     }
-    for el in config.server.iter() {
+    for server in config.server.iter() {
         let (snd, rcv) = unbounded();
-        packet_receivers.insert(el.id, rcv);
-        packet_senders.insert(el.id, snd);
+        packet_receivers.insert(server.id, rcv);
+        packet_senders.insert(server.id, snd);
     }
 
     let mut intermediate_nodes = HashMap::new();
 
     for drone in config.drone.iter() {
-        let mut packet_send = HashMap::new();
-        for neighbor_id in drone.connected_node_ids.iter() {
-            if let Some(snd) = packet_senders.get(neighbor_id) {
-                packet_send.insert(*neighbor_id, snd.clone());
-            }
-        }
+        let mut packet_send = insert_all_packet_send(&drone.connected_node_ids, &packet_senders);
+
         intermediate_nodes.insert(
             drone.id,
             IntermediateNode::Drone {
@@ -95,19 +106,6 @@ pub fn create_intermediate_topology(
                 packet_send,
             },
         );
-    }
-
-    fn insert_all_packet_send(
-        connected_drone_ids: &[NodeId],
-        packet_senders: &HashMap<NodeId, Sender<Packet>>,
-    ) -> HashMap<NodeId, Sender<Packet>> {
-        let mut packet_send = HashMap::new();
-        for neighbor_id in connected_drone_ids.iter() {
-            if let Some(snd) = packet_senders.get(neighbor_id) {
-                packet_send.insert(*neighbor_id, snd.clone());
-            }
-        }
-        packet_send
     }
 
     for server in config.server.iter() {
@@ -122,6 +120,7 @@ pub fn create_intermediate_topology(
             },
         );
     }
+
     for client in config.client.iter() {
         let packet_send = insert_all_packet_send(&client.connected_drone_ids, &packet_senders);
 
@@ -148,16 +147,12 @@ pub fn create_nodes(
         HashMap<NodeId, Sender<Packet>>,
         f32,
     ) -> Box<dyn Node>,
-    mut client_creator: impl FnMut(
-        NodeId,
-        Receiver<Packet>,
-        HashMap<NodeId, Sender<Packet>>,
-    ) -> Option<Box<dyn Node>>,
-    mut server_creator: impl FnMut(
-        NodeId,
-        Receiver<Packet>,
-        HashMap<NodeId, Sender<Packet>>,
-    ) -> Option<Box<dyn Node>>,
+    mut client_creator: Option<
+        impl FnMut(NodeId, Receiver<Packet>, HashMap<NodeId, Sender<Packet>>) -> Box<dyn Node>,
+    >,
+    mut server_creator: Option<
+        impl FnMut(NodeId, Receiver<Packet>, HashMap<NodeId, Sender<Packet>>) -> Box<dyn Node>,
+    >,
 ) -> HashMap<NodeId, Box<dyn Node>> {
     let mut nodes: HashMap<NodeId, Box<dyn Node>> = HashMap::new();
     for node in intermediate_nodes.into_values() {
@@ -185,9 +180,9 @@ pub fn create_nodes(
                 packet_recv,
                 packet_send,
             } => {
-                let boxed_client = client_creator(id, packet_recv, packet_send);
-                if let Some(boxed_client) = boxed_client {
-                    nodes.insert(id, boxed_client);
+                if let Some(creator) = client_creator.as_mut() {
+                    let node = creator(id, packet_recv, packet_send);
+                    nodes.insert(id, node);
                 }
             }
             IntermediateNode::Server {
@@ -195,9 +190,9 @@ pub fn create_nodes(
                 packet_recv,
                 packet_send,
             } => {
-                let boxed_server = server_creator(id, packet_recv, packet_send);
-                if let Some(boxed_server) = boxed_server {
-                    nodes.insert(id, boxed_server);
+                if let Some(creator) = server_creator.as_mut() {
+                    let node = creator(id, packet_recv, packet_send);
+                    nodes.insert(id, node.into());
                 }
             }
         }
@@ -208,7 +203,40 @@ pub fn create_nodes(
 pub fn spawn_threads(nodes: HashMap<NodeId, Box<dyn Node>>) -> HashMap<NodeId, JoinHandle<()>> {
     let mut handles = HashMap::new();
     for (id, mut node) in nodes.into_iter() {
-        handles.insert(id, thread::spawn(move || node.run()));
+        handles.insert(
+            id,
+            thread::Builder::new()
+                .name(format!("Node {id}"))
+                .spawn(move || node.run())
+                .expect("Failed to spawn thread"),
+        );
     }
     handles
+}
+
+pub fn create_topology_from_str(
+    path: &str,
+    drone_creator: impl FnMut(
+        NodeId,
+        Sender<DroneEvent>,
+        Receiver<DroneCommand>,
+        Receiver<Packet>,
+        HashMap<NodeId, Sender<Packet>>,
+        f32,
+    ) -> Box<dyn Node>,
+    client_creator: Option<
+        impl FnMut(NodeId, Receiver<Packet>, HashMap<NodeId, Sender<Packet>>) -> Box<dyn Node>,
+    >,
+    server_creator: Option<
+        impl FnMut(NodeId, Receiver<Packet>, HashMap<NodeId, Sender<Packet>>) -> Box<dyn Node>,
+    >,
+) -> HashMap<NodeId, Box<dyn Node>> {
+    let config = read_config_file(path);
+    let (intermediate_nodes, _) = create_intermediate_topology(config);
+    create_nodes(
+        intermediate_nodes,
+        drone_creator,
+        client_creator,
+        server_creator,
+    )
 }

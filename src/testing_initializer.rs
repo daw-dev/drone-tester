@@ -96,16 +96,16 @@ pub fn create_test_environment(
         HashMap<NodeId, Sender<Packet>>,
         f32,
     ) -> Box<dyn Node>,
-    client_creator: impl FnMut(
+    client_creator: Option<impl FnMut(
         NodeId,
         Receiver<Packet>,
         HashMap<NodeId, Sender<Packet>>,
-    ) -> Option<Box<dyn Node>>,
-    server_creator: impl FnMut(
+    ) -> Box<dyn Node>>,
+    server_creator: Option<impl FnMut(
         NodeId,
         Receiver<Packet>,
         HashMap<NodeId, Sender<Packet>>,
-    ) -> Option<Box<dyn Node>>,
+    ) -> Box<dyn Node>>,
 ) {
     let mut config = read_config_file(topology_file_path);
 
