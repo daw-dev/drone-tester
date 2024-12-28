@@ -1,35 +1,65 @@
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use rand::{thread_rng, Rng};
-use topology_setup::{create_topology_from_config, spawn_threads, ClientServerCreator, Runnable};
 use std::collections::{HashMap, HashSet};
-use std::thread;
+use std::mem;
+use topology_setup::{create_topology_from_config, spawn_threads, ClientServerCreator, Runnable};
 use wg_2024::config::Drone;
-use wg_2024::controller::{DroneCommand, DroneEvent};
+use wg_2024::controller::DroneCommand;
 use wg_2024::network::NodeId;
 use wg_2024::packet::Packet;
 
-trait TestFunction: Send {
-    fn call(&mut self, id: &NodeId, packet_recv: &mut Receiver<Packet>, packet_send: &mut HashMap<NodeId, Sender<Packet>>);
+pub trait TestFunction: Send {
+    fn call(
+        &mut self,
+        id: NodeId,
+        packet_recv: Receiver<Packet>,
+        packet_send: HashMap<NodeId, Sender<Packet>>,
+    );
 }
 
 impl<F> TestFunction for F
 where
-    F: FnMut(&NodeId, &mut Receiver<Packet>, &mut HashMap<NodeId, Sender<Packet>>) + Send,
+    F: FnMut(NodeId, Receiver<Packet>, HashMap<NodeId, Sender<Packet>>) + Send,
 {
-    fn call(&mut self, id: &NodeId, packet_recv: &mut Receiver<Packet>, packet_send: &mut HashMap<NodeId, Sender<Packet>>) {
+    fn call(
+        &mut self,
+        id: NodeId,
+        packet_recv: Receiver<Packet>,
+        packet_send: HashMap<NodeId, Sender<Packet>>,
+    ) {
         self(id, packet_recv, packet_send);
     }
 }
 
-trait DroneCreatorWithCommandReceiver {
-    fn create_drone(&mut self, id: NodeId, command_recv: Receiver<DroneCommand>, packet_recv: Receiver<Packet>, packet_send: HashMap<NodeId, Sender<Packet>>, pdr: f32) -> Box<dyn Runnable>;
+pub trait DroneCreatorWithCommandReceiver {
+    fn create_drone(
+        &mut self,
+        id: NodeId,
+        command_recv: Receiver<DroneCommand>,
+        packet_recv: Receiver<Packet>,
+        packet_send: HashMap<NodeId, Sender<Packet>>,
+        pdr: f32,
+    ) -> Box<dyn Runnable>;
 }
 
 impl<F> DroneCreatorWithCommandReceiver for F
 where
-    F: FnMut(NodeId, Receiver<DroneCommand>, Receiver<Packet>, HashMap<NodeId, Sender<Packet>>, f32) -> Box<dyn Runnable>,
+    F: FnMut(
+        NodeId,
+        Receiver<DroneCommand>,
+        Receiver<Packet>,
+        HashMap<NodeId, Sender<Packet>>,
+        f32,
+    ) -> Box<dyn Runnable>,
 {
-    fn create_drone(&mut self, id: NodeId, command_recv: Receiver<DroneCommand>, packet_recv: Receiver<Packet>, packet_send: HashMap<NodeId, Sender<Packet>>, pdr: f32) -> Box<dyn Runnable> {
+    fn create_drone(
+        &mut self,
+        id: NodeId,
+        command_recv: Receiver<DroneCommand>,
+        packet_recv: Receiver<Packet>,
+        packet_send: HashMap<NodeId, Sender<Packet>>,
+        pdr: f32,
+    ) -> Box<dyn Runnable> {
         self(id, command_recv, packet_recv, packet_send, pdr)
     }
 }
@@ -69,14 +99,24 @@ struct TestNode {
     id: NodeId,
     packet_recv: Receiver<Packet>,
     packet_send: HashMap<NodeId, Sender<Packet>>,
-    node_behaviour: Option<Box<dyn TestFunction + 'static>>,
+    node_behaviour: Box<dyn TestFunction + 'static>,
 }
 
 impl Runnable for TestNode {
     fn run(&mut self) {
-        if let Some(mut behaviour) = self.node_behaviour.take() {
-            behaviour.call(&self.id, &mut self.packet_recv, &mut self.packet_send);
-        }
+        let mut old_self = mem::replace(
+            self,
+            TestNode {
+                id: 0,
+                packet_recv: unbounded().1,
+                packet_send: HashMap::new(),
+                node_behaviour: Box::new(|_, _, _| {}),
+            },
+        );
+
+        old_self
+            .node_behaviour
+            .call(old_self.id, old_self.packet_recv, old_self.packet_send);
     }
 }
 
@@ -153,20 +193,25 @@ pub fn create_test_environment(
 
     let mut command_senders = HashMap::new();
 
-    let runnables: HashMap<NodeId, _> = create_topology_from_config(&config, |id, packet_recv, packet_send, pdr| {
-        if let Some(test_node) = test_nodes.remove(&id) {
-            Box::new(TestNode {
-                id,
-                packet_recv,
-                packet_send,
-                node_behaviour: Some(test_node.node_behaviour),
-            })
-        } else {
-            let (command_send, command_recv) = crossbeam_channel::unbounded();
-            command_senders.insert(id, command_send);
-            drone_creator.create_drone(id, command_recv, packet_recv, packet_send, pdr)
-        }
-    }, client_creator, server_creator);
+    let runnables: HashMap<NodeId, _> = create_topology_from_config(
+        &config,
+        |id, packet_recv, packet_send, pdr| {
+            if let Some(test_node) = test_nodes.remove(&id) {
+                Box::new(TestNode {
+                    id,
+                    packet_recv,
+                    packet_send,
+                    node_behaviour: test_node.node_behaviour,
+                })
+            } else {
+                let (command_send, command_recv) = crossbeam_channel::unbounded();
+                command_senders.insert(id, command_send);
+                drone_creator.create_drone(id, command_recv, packet_recv, packet_send, pdr)
+            }
+        },
+        client_creator,
+        server_creator,
+    );
 
     let mut join_handles = spawn_threads(runnables);
 

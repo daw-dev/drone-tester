@@ -1,11 +1,12 @@
 use crate::testing_initializer::{create_test_environment, PDRPolicy, TestNodeInstructions};
-use crate::topology_setup::Node;
+use crate::DummyNode;
 use bagel_bomber::BagelBomber;
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{unbounded, Receiver, Sender};
+use topology_setup::Runnable;
 use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
-use wg_2024::controller::{DroneCommand, DroneEvent};
+use wg_2024::controller::DroneCommand;
 use wg_2024::drone::Drone;
 use wg_2024::network::{NodeId, SourceRoutingHeader};
 use wg_2024::packet::NodeType::Client;
@@ -13,15 +14,14 @@ use wg_2024::packet::{FloodRequest, Fragment, Packet, PacketType, FRAGMENT_DSIZE
 
 pub fn create_bagel_bomber(
     id: NodeId,
-    controller_send: Sender<DroneEvent>,
     controller_recv: Receiver<DroneCommand>,
     packet_recv: Receiver<Packet>,
     packet_send: HashMap<NodeId, Sender<Packet>>,
     pdr: f32,
-) -> Box<dyn Node> {
+) -> Box<dyn Runnable> {
     Box::new(BagelBomber::new(
         id,
-        controller_send,
+        unbounded().0,
         controller_recv,
         packet_recv,
         packet_send,
@@ -29,20 +29,11 @@ pub fn create_bagel_bomber(
     ))
 }
 
-pub fn create_none_client_server(
-    _id: NodeId,
-    _packet_recv: Receiver<Packet>,
-    _packet_send: HashMap<NodeId, Sender<Packet>>,
-) -> Option<Box<dyn Node>> {
-    None
-}
-
 #[test]
 fn flooding() {
-    let client = TestNodeInstructions::with_random_id(vec![1], |params| {
+    let client = TestNodeInstructions::with_random_id(vec![1], |id: NodeId, packet_recv: Receiver<Packet>, packet_send: HashMap<NodeId, Sender<Packet>>| {
         println!("Client running");
-        params
-            .packet_send
+        packet_send
             .get(&1)
             .unwrap()
             .send(Packet {
@@ -53,8 +44,8 @@ fn flooding() {
                 },
                 pack_type: PacketType::FloodRequest(FloodRequest {
                     flood_id: 0,
-                    initiator_id: params.id,
-                    path_trace: vec![(params.id, Client)],
+                    initiator_id: id,
+                    path_trace: vec![(id, Client)],
                 }),
             })
             .ok();
@@ -63,35 +54,32 @@ fn flooding() {
 
         let mut response_received = false;
 
-        for packet in params.packet_recv.try_iter() {
+        for packet in packet_recv.try_iter() {
             if let PacketType::FloodResponse(response) = packet.pack_type {
-                println!("Client {} received {:?}", params.id, response);
+                println!("Client {} received {:?}", id, response);
                 assert_eq!(response.flood_id, 0);
                 response_received = true;
             }
         }
 
         assert!(response_received);
-
-        params.end_simulation()
     });
     create_test_environment(
         "topologies/examples/double-chain/topology.toml",
         vec![client],
         PDRPolicy::Zero,
         create_bagel_bomber,
-        None::<fn(_,_,_)->_>,
-        None::<fn(_,_,_)->_>,
+        DummyNode::create_client_server,
+        DummyNode::create_client_server,
     )
 }
 
 #[test]
 fn client_server_ping() {
-    let client = TestNodeInstructions::with_node_id(40, vec![3], |params| {
+    let client = TestNodeInstructions::with_node_id(40, vec![3], |id: NodeId, packet_recv: Receiver<Packet>, packet_send: HashMap<u8, Sender<Packet>>| {
         thread::sleep(Duration::from_millis(1000));
         println!("Client running");
-        params
-            .packet_send
+        packet_send
             .get(&3)
             .unwrap()
             .send(Packet {
@@ -113,9 +101,9 @@ fn client_server_ping() {
 
         let mut response_received = false;
 
-        for packet in params.packet_recv.try_iter() {
+        for packet in packet_recv.try_iter() {
             if let PacketType::MsgFragment(response) = packet.pack_type {
-                println!("Client {} received {:?}", params.id, response);
+                println!("Client {} received {:?}", id, response);
                 assert_eq!(response.fragment_index, 0);
                 assert_eq!(response.total_n_fragments, 1);
                 assert_eq!(response.data, [1; FRAGMENT_DSIZE]);
@@ -124,20 +112,18 @@ fn client_server_ping() {
         }
 
         assert!(response_received);
-
-        params.end_simulation()
     });
 
-    let server = TestNodeInstructions::with_node_id(50, vec![8], |params| {
+    let server = TestNodeInstructions::with_node_id(50, vec![8], |id: NodeId, packet_recv: Receiver<Packet>, packet_send: HashMap<u8, Sender<Packet>>| {
         thread::sleep(Duration::from_millis(1000));
 
         println!("Server running");
 
         let mut request_received = false;
 
-        for packet in params.packet_recv.try_iter() {
+        for packet in packet_recv.try_iter() {
             if let PacketType::MsgFragment(response) = packet.pack_type {
-                println!("Server {} received {:?}", params.id, response);
+                println!("Server {} received {:?}", id, response);
 
                 assert_eq!(response.fragment_index, 0);
                 assert_eq!(response.total_n_fragments, 1);
@@ -145,8 +131,7 @@ fn client_server_ping() {
 
                 request_received = true;
 
-                params
-                    .packet_send
+                packet_send
                     .get(&8)
                     .unwrap()
                     .send(Packet {
@@ -167,8 +152,6 @@ fn client_server_ping() {
         }
 
         assert!(request_received);
-
-        params.end_simulation()
     });
 
     create_test_environment(
@@ -176,8 +159,8 @@ fn client_server_ping() {
         vec![client, server],
         PDRPolicy::Zero,
         create_bagel_bomber,
-        None::<fn(_,_,_)->_>,
-        None::<fn(_,_,_)->_>,
+        DummyNode::create_client_server,
+        DummyNode::create_client_server,
     )
 }
 
@@ -185,7 +168,7 @@ fn client_server_ping() {
 fn continuous_ping() {
     let ping_count = 600;
 
-    let client = TestNodeInstructions::with_node_id(40, vec![3], move |params| {
+    let client = TestNodeInstructions::with_node_id(40, vec![3], move |id: NodeId, packet_recv: Receiver<Packet>, packet_send: HashMap<u8, Sender<Packet>>| {
         println!("Client running");
 
         for i in 0..ping_count {
@@ -195,30 +178,28 @@ fn continuous_ping() {
                 Fragment::from_string(i, ping_count, "Hello, world!".to_string()),
             );
 
-            params.packet_send.get(&3).unwrap().send(packet).ok();
+            packet_send.get(&3).unwrap().send(packet).ok();
 
             thread::sleep(Duration::from_millis(1000));
 
-            for packet in params.packet_recv.try_iter() {
+            for packet in packet_recv.try_iter() {
                 if let PacketType::MsgFragment(response) = packet.pack_type {
-                    println!("Client {} received {}", params.id, response);
+                    println!("Client {} received {}", id, response);
                 }
             }
         }
 
-        println!("Client {} ending simulation", params.id);
-
-        params.end_simulation()
+        println!("Client {} ending simulation", id);
     });
 
-    let server = TestNodeInstructions::with_node_id(50, vec![8], |params| {
+    let server = TestNodeInstructions::with_node_id(50, vec![8], |id: NodeId, packet_recv: Receiver<Packet>, packet_send: HashMap<u8, Sender<Packet>>| {
         println!("Server running");
 
         thread::sleep(Duration::from_millis(500));
 
-        for in_packet in params.packet_recv.iter() {
+        for in_packet in packet_recv.iter() {
             if let PacketType::MsgFragment(request) = in_packet.pack_type {
-                println!("Server {} received {}", params.id, request);
+                println!("Server {} received {}", id, request);
 
                 let packet = Packet::new_fragment(
                     SourceRoutingHeader::with_first_hop(vec![50, 8, 7, 5, 3, 40]),
@@ -226,7 +207,7 @@ fn continuous_ping() {
                     request.clone(),
                 );
 
-                let send = params.packet_send.get(&8).unwrap();
+                let send = packet_send.get(&8).unwrap();
 
                 send.send(packet).ok();
 
@@ -240,8 +221,7 @@ fn continuous_ping() {
 
         thread::sleep(Duration::from_millis(1000));
 
-        println!("Server {} ending simulation", params.id);
-        return params.end_simulation();
+        println!("Server {} ending simulation", id);
     });
 
     create_test_environment(
@@ -249,7 +229,7 @@ fn continuous_ping() {
         vec![client, server],
         PDRPolicy::Severe,
         create_bagel_bomber,
-        None::<fn(_,_,_)->_>,
-        None::<fn(_,_,_)->_>,
+        DummyNode::create_client_server,
+        DummyNode::create_client_server,
     )
 }
