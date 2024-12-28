@@ -2,14 +2,13 @@ mod testing_initializer;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
-
-use crossbeam_channel::Receiver;
-use crossbeam_channel::Sender;
 pub use testing_initializer::create_test_environment;
 pub use testing_initializer::PDRPolicy;
 pub use testing_initializer::TestNodeInstructions;
-use topology_setup::Runnable;
+pub use topology_setup::Runnable;
+use std::collections::HashMap;
+use crossbeam_channel::Receiver;
+use crossbeam_channel::Sender;
 use wg_2024::network::NodeId;
 use wg_2024::packet::Packet;
 
