@@ -1,4 +1,4 @@
-use crate::testing_initializer::{create_test_environment, PDRPolicy, TestNode};
+use crate::testing_initializer::{create_test_environment, PDRPolicy, TestNodeInstructions};
 use crate::topology_setup::Node;
 use bagel_bomber::BagelBomber;
 use crossbeam_channel::{Receiver, Sender};
@@ -39,7 +39,7 @@ pub fn create_none_client_server(
 
 #[test]
 fn flooding() {
-    let client = TestNode::with_random_id(vec![1], |params| {
+    let client = TestNodeInstructions::with_random_id(vec![1], |params| {
         println!("Client running");
         params
             .packet_send
@@ -87,7 +87,7 @@ fn flooding() {
 
 #[test]
 fn client_server_ping() {
-    let client = TestNode::with_node_id(40, vec![3], |params| {
+    let client = TestNodeInstructions::with_node_id(40, vec![3], |params| {
         thread::sleep(Duration::from_millis(1000));
         println!("Client running");
         params
@@ -128,7 +128,7 @@ fn client_server_ping() {
         params.end_simulation()
     });
 
-    let server = TestNode::with_node_id(50, vec![8], |params| {
+    let server = TestNodeInstructions::with_node_id(50, vec![8], |params| {
         thread::sleep(Duration::from_millis(1000));
 
         println!("Server running");
@@ -185,7 +185,7 @@ fn client_server_ping() {
 fn continuous_ping() {
     let ping_count = 600;
 
-    let client = TestNode::with_node_id(40, vec![3], move |params| {
+    let client = TestNodeInstructions::with_node_id(40, vec![3], move |params| {
         println!("Client running");
 
         for i in 0..ping_count {
@@ -211,7 +211,7 @@ fn continuous_ping() {
         params.end_simulation()
     });
 
-    let server = TestNode::with_node_id(50, vec![8], |params| {
+    let server = TestNodeInstructions::with_node_id(50, vec![8], |params| {
         println!("Server running");
 
         thread::sleep(Duration::from_millis(500));
